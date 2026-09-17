@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Triage &mdash; __REPO__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #F2F4F1;
+    --panel: #FFFFFF;
+    --panel-2: #EBEFEA;
+    --border: #DCE2DB;
+    --ink: #1A2420;
+    --ink-soft: #59645D;
+    --ink-faint: #8B958F;
+    --accent: #24708F;
+    --accent-ink: #FFFFFF;
+    --good: #2E8B57;
+    --warn: #B8842A;
+    --bad: #C1442D;
+    --row-hover: #E7EFEC;
+    --shadow: 0 1px 2px rgba(20, 30, 26, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10161A; --panel: #172025; --panel-2: #1D272C; --border: #2A363B;
+      --ink: #E7EEEA; --ink-soft: #8FA29A; --ink-faint: #5E7169;
+      --accent: #5FB4D6; --accent-ink: #08181D;
+      --good: #4FC488; --warn: #E3A94D; --bad: #E2694E;
+      --row-hover: #1C2A2C; --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10161A; --panel: #172025; --panel-2: #1D272C; --border: #2A363B;
+    --ink: #E7EEEA; --ink-soft: #8FA29A; --ink-faint: #5E7169;
+    --accent: #5FB4D6; --accent-ink: #08181D;
+    --good: #4FC488; --warn: #E3A94D; --bad: #E2694E;
+    --row-hover: #1C2A2C; --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 24px clamp(16px, 4vw, 32px) 60px;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  header.page { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 {
+    font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -0.01em; text-wrap: balance;
+  }
+  h1 .repo { color: var(--accent); }
+  .meta { color: var(--ink-soft); font-size: 12.5px; }
+  .meta .mono { color: var(--ink-faint); }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    gap: 10px; margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-top: 3px solid var(--stat-c, var(--border));
+    border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow);
+  }
+  .stat .n { font-size: 22px; font-weight: 700; line-height: 1.1; }
+  .stat .l { color: var(--ink-soft); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; margin-top: 3px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  }
+  input[type=search], select {
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px; font: 13px "IBM Plex Sans", sans-serif;
+  }
+  input[type=search]:focus, select:focus, th:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  input[type=search] { flex: 1 1 220px; min-width: 140px; }
+  select { cursor: pointer; }
+
+  .tablewrap {
+    overflow-x: auto; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); box-shadow: var(--shadow);
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th {
+    cursor: pointer; user-select: none; color: var(--ink-soft); font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+    position: sticky; top: 0; background: var(--panel-2); z-index: 1;
+  }
+  th:hover { color: var(--ink); }
+  th[aria-sort]::after { content: ' \2193'; opacity: .5; }
+  th[aria-sort="ascending"]::after { content: ' \2191'; opacity: .8; }
+  th[aria-sort="descending"]::after { content: ' \2193'; opacity: .8; }
+  tbody tr.row { cursor: pointer; }
+  tbody tr.row:hover { background: var(--row-hover); }
+  tbody tr.row.draft { opacity: .5; }
+  tbody tr.row.expanded { background: var(--row-hover); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .title-cell { max-width: 360px; }
+  .title-cell a { color: var(--ink); font-weight: 500; }
+  .title-cell a:hover { color: var(--accent); }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .02em; white-space: nowrap;
+  }
+  .b-good { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+  .b-bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+  .b-warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .b-muted { background: color-mix(in srgb, var(--ink-faint) 20%, transparent); color: var(--ink-soft); }
+
+  /* Score as a signal meter, echoing the RSSI bars on the radios this repo ships firmware for */
+  .meter-cell { display: flex; align-items: center; gap: 8px; }
+  .meter-num { width: 34px; text-align: right; font-weight: 600; font-size: 13px; }
+  .meter-num.neg { color: var(--bad); }
+  .meter-num.pos { color: var(--good); }
+  .meter {
+    position: relative; width: 64px; height: 12px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 3px; overflow: hidden; flex: none;
+  }
+  .meter::before {
+    content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border);
+  }
+  .meter .fill { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; }
+  .meter .fill.pos { left: 50%; background: var(--good); }
+  .meter .fill.neg { right: 50%; background: var(--bad); }
+
+  .num-cell { font-size: 13px; }
+  .subtle { color: var(--ink-faint); font-size: 11.5px; }
+
+  .detail-row td { background: var(--panel-2); cursor: default; padding: 0; }
+  .detail { padding: 14px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 640px) { .detail { grid-template-columns: 1fr; } }
+  .detail h4 {
+    margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft);
+  }
+  .detail ul { margin: 0; padding-left: 18px; }
+  .detail li { margin-bottom: 6px; line-height: 1.45; }
+  .detail li:last-child { margin-bottom: 0; }
+  .empty { color: var(--ink-faint); font-style: italic; font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <h1>PR Triage &mdash; <span class="repo">__REPO__</span></h1>
+  <div class="meta">Generated <span class="mono">__GENERATED__</span> &middot; <span class="mono">__COUNT__</span> open PRs analyzed</div>
+</header>
+
+<div class="stats" id="stats"></div>
+
+<div class="toolbar">
+  <input type="search" id="search" placeholder="Search title, author, or #&hellip;">
+  <select id="ciFilter"><option value="">CI: any</option></select>
+  <select id="mergeFilter"><option value="">Merge: any</option></select>
+  <select id="reviewFilter"><option value="">Review: any</option></select>
+  <select id="draftFilter">
+    <option value="">Drafts: include</option>
+    <option value="hide">Drafts: hide</option>
+    <option value="only">Drafts: only</option>
+  </select>
+</div>
+
+<div class="tablewrap">
+<table id="tbl">
+  <thead>
+    <tr>
+      <th data-key="number">#</th>
+      <th data-key="title">Title</th>
+      <th data-key="author">Author</th>
+      <th data-key="reviewerScore">Priority</th>
+      <th data-key="ci">CI</th>
+      <th data-key="mergeable">Merge</th>
+      <th data-key="reviewDecision">Review</th>
+      <th data-key="diffLines">Diff</th>
+      <th data-key="ageDays">Age (d)</th>
+      <th data-key="idleDays">Idle (d)</th>
+      <th>Flags</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script>
+const DATA = __DATA__;
+const SCORE_SCALE = 100; // score magnitude that fills half the meter
+
+function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
+function ciBadge(v) {
+  return { PASSING: badge('passing', 'b-good'), FAILING: badge('failing', 'b-bad'),
+    PENDING: badge('pending', 'b-warn'), NONE: badge('none', 'b-muted') }[v] || v;
+}
+function mergeBadge(v) {
+  return { MERGEABLE: badge('clean', 'b-good'), CONFLICTING: badge('conflict', 'b-bad'),
+    UNKNOWN: badge('unknown', 'b-muted') }[v] || v;
+}
+function reviewBadge(v) {
+  return { APPROVED: badge('approved', 'b-good'), CHANGES_REQUESTED: badge('changes req.', 'b-bad'),
+    REVIEW_REQUIRED: badge('required', 'b-warn'), NONE: badge('none', 'b-muted') }[v] || v;
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function meter(score) {
+  const pct = Math.max(-100, Math.min(100, (score / SCORE_SCALE) * 100)) / 2; // half-track max
+  const fillClass = score >= 0 ? 'pos' : 'neg';
+  const numClass = score >= 0 ? 'pos' : 'neg';
+  return `
+    <div class="meter-cell">
+      <span class="meter-num mono ${numClass}">${score}</span>
+      <span class="meter" title="Priority ${score}">
+        <span class="fill ${fillClass}" style="width:${Math.abs(pct)}%"></span>
+      </span>
+    </div>`;
+}
+
+function populateFilter(id, key) {
+  const sel = document.getElementById(id);
+  const values = [...new Set(DATA.map(d => d[key]))].sort();
+  for (const v of values) {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    sel.appendChild(opt);
+  }
+}
+populateFilter('ciFilter', 'ci');
+populateFilter('mergeFilter', 'mergeable');
+populateFilter('reviewFilter', 'reviewDecision');
+
+function renderStats(rows) {
+  const stats = [
+    ['Open PRs', rows.length, null],
+    ['Drafts', rows.filter(r => r.isDraft).length, null],
+    ['CI failing', rows.filter(r => r.ci === 'FAILING').length, 'bad'],
+    ['Conflicts', rows.filter(r => r.mergeable === 'CONFLICTING').length, 'bad'],
+    ['Empty/short desc.', rows.filter(r => r.descriptionState !== 'OK').length, 'warn'],
+    ['No testing mentioned', rows.filter(r => r.descriptionState === 'OK' && !r.mentionsTesting).length, 'warn'],
+    ['Approved, unmerged', rows.filter(r => r.reviewDecision === 'APPROVED').length, 'good'],
+    ['Likely abandoned', rows.filter(r => r.idleDays > 21 && r.reviewDecision === 'CHANGES_REQUESTED').length, 'warn'],
+  ];
+  document.getElementById('stats').innerHTML = stats.map(([l, n, sem]) =>
+    `<div class="stat" style="${sem ? `--stat-c: var(--${sem})` : ''}">
+      <div class="n mono">${n}</div><div class="l">${l}</div>
+    </div>`).join('');
+}
+renderStats(DATA);
+
+let sortKey = 'reviewerScore', sortDir = -1;
+let expanded = null;
+
+function currentRows() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const ci = document.getElementById('ciFilter').value;
+  const merge = document.getElementById('mergeFilter').value;
+  const review = document.getElementById('reviewFilter').value;
+  const draft = document.getElementById('draftFilter').value;
+  let rows = DATA.filter(r => {
+    if (q && !(`${r.number} ${r.title} ${r.author}`.toLowerCase().includes(q))) return false;
+    if (ci && r.ci !== ci) return false;
+    if (merge && r.mergeable !== merge) return false;
+    if (review && r.reviewDecision !== review) return false;
+    if (draft === 'hide' && r.isDraft) return false;
+    if (draft === 'only' && !r.isDraft) return false;
+    return true;
+  });
+  rows.sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+  return rows;
+}
+
+function render() {
+  const rows = currentRows();
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.className = 'row' + (r.isDraft ? ' draft' : '') + (expanded === r.number ? ' expanded' : '');
+    tr.dataset.number = r.number;
+    const flagCount = r.submitterFeedback.length;
+    tr.innerHTML = `
+      <td class="mono num-cell">${r.number}</td>
+      <td class="title-cell"><a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>${r.isDraft ? ' ' + badge('draft', 'b-muted') : ''}${r.suspiciousAgentMarker ? ' ' + badge('&#9888; agent-marker', 'b-warn') : ''}</td>
+      <td>${esc(r.author)}</td>
+      <td>${meter(r.reviewerScore)}</td>
+      <td>${ciBadge(r.ci)}</td>
+      <td>${mergeBadge(r.mergeable)}</td>
+      <td>${reviewBadge(r.reviewDecision)}</td>
+      <td class="mono num-cell">${r.diffLines}<span class="subtle">/${r.filesChanged}f</span></td>
+      <td class="mono num-cell">${r.ageDays}</td>
+      <td class="mono num-cell">${r.idleDays}</td>
+      <td class="subtle">${flagCount ? flagCount + ' &#9888;' : '&ndash;'}</td>
+    `;
+    tr.addEventListener('click', () => {
+      expanded = expanded === r.number ? null : r.number;
+      render();
+    });
+    tbody.appendChild(tr);
+    if (expanded === r.number) {
+      const dr = document.createElement('tr');
+      dr.className = 'detail-row';
+      const td = document.createElement('td');
+      td.colSpan = 11;
+      const submitter = r.submitterFeedback.length
+        ? `<ul>${r.submitterFeedback.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`
+        : '<div class="empty">No issues flagged.</div>';
+      const reviewer = r.reviewerReasons.length
+        ? `<ul>${r.reviewerReasons.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`
+        : '<div class="empty">No standout signals.</div>';
+      td.innerHTML = `<div class="detail">
+        <div><h4>Feedback for submitter</h4>${submitter}</div>
+        <div><h4>Why a reviewer might pick this up</h4>${reviewer}</div>
+      </div>`;
+      dr.appendChild(td);
+      tbody.appendChild(dr);
+    }
+  }
+}
+
+document.querySelectorAll('th[data-key]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = key === 'title' || key === 'author' ? 1 : -1; }
+    document.querySelectorAll('th[data-key]').forEach(t => t.removeAttribute('aria-sort'));
+    th.setAttribute('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
+    render();
+  });
+});
+['search', 'ciFilter', 'mergeFilter', 'reviewFilter', 'draftFilter'].forEach(id =>
+  document.getElementById(id).addEventListener('input', render));
+
+render();
+</script>
+</body>
+</html>
