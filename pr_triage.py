@@ -100,19 +100,60 @@ def diff_size_score(diff_lines):
     return max(DIFF_SIZE_PENALTY_MAX, DIFF_SIZE_BONUS_MAX - DIFF_SIZE_LOG_WEIGHT * math.log2(diff_lines + 1))
 
 
+GH_RETRY_ATTEMPTS = 4
+GH_RETRY_BACKOFF = 1.5  # seconds; doubles each attempt (1.5, 3, 6)
+
+# Fetching the full BULK_FIELDS set (statusCheckRollup in particular) for
+# every open PR in one `gh pr list` call reliably 502s / truncates once a
+# repo has a few hundred open PRs, because GitHub computes checks lazily per
+# PR on its backend rather than in bulk. Splitting the fetch into windows of
+# this size keeps each call fast (single digit seconds) and well clear of
+# that limit.
+BULK_CHUNK_SIZE = 50
+
+
 def run_gh(args):
-    result = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout
+    last_err = None
+    for attempt in range(GH_RETRY_ATTEMPTS):
+        if attempt:
+            time.sleep(GH_RETRY_BACKOFF * (2 ** (attempt - 1)))
+        result = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout
+        last_err = result.stderr.strip()
+    raise RuntimeError(f"gh {' '.join(args)} failed after {GH_RETRY_ATTEMPTS} attempts: {last_err}")
 
 
 def fetch_prs(repo, limit):
+    # Cheap first pass: just enough per PR to build date-bounded chunks for
+    # the expensive fetch below. This call is light enough to survive at any
+    # PR count even though the full-field one isn't.
     out = run_gh([
         "pr", "list", "--repo", repo, "--state", "open", "--limit", str(limit),
-        "--json", BULK_FIELDS,
+        "--json", "number,createdAt",
     ])
-    return json.loads(out)
+    dated = json.loads(out)
+    if not dated:
+        return []
+    dated.sort(key=lambda p: p["createdAt"])
+
+    all_prs = {}
+    chunks = [dated[i:i + BULK_CHUNK_SIZE] for i in range(0, len(dated), BULK_CHUNK_SIZE)]
+    for i, chunk in enumerate(chunks):
+        start, end = chunk[0]["createdAt"], chunk[-1]["createdAt"]
+        print(f"  fetching PRs {i + 1}/{len(chunks)} ({start}..{end})...", file=sys.stderr)
+        out = run_gh([
+            "pr", "list", "--repo", repo, "--state", "open",
+            # created-date window instead of a flat --limit/offset: gh pr list
+            # has no offset, and narrowing by search is what keeps each call's
+            # server-side work (and 502 risk) small.
+            "--search", f"created:{start}..{end}",
+            "--limit", str(len(chunk) + 10),  # slack for same-instant PRs at the window edge
+            "--json", BULK_FIELDS,
+        ])
+        for pr in json.loads(out):
+            all_prs[pr["number"]] = pr  # dedupe PRs shared by adjacent windows' inclusive bounds
+    return list(all_prs.values())
 
 
 def get_github_token():
