@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PR Triage &mdash; __REPO__</title>
+<title>Triage &mdash; __REPO__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <style>
@@ -148,46 +148,37 @@
   .detail li:last-child { margin-bottom: 0; }
   .empty { color: var(--ink-faint); font-style: italic; font-size: 13px; }
   [hidden] { display: none !important; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    padding: 8px 14px; color: var(--ink-soft); font: 600 13px "IBM Plex Sans", sans-serif; cursor: pointer;
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tabs .count { color: var(--ink-faint); font-weight: 500; margin-left: 4px; }
 </style>
 </head>
 <body>
 
 <header class="page">
-  <h1>PR Triage &mdash; <span class="repo">__REPO__</span></h1>
-  <div class="meta">Generated <span class="mono">__GENERATED__</span> &middot; <span class="mono">__COUNT__</span> open PRs analyzed</div>
+  <h1>Triage &mdash; <span class="repo">__REPO__</span></h1>
+  <div class="meta">Generated <span class="mono">__GENERATED__</span> &middot; <span class="mono">__COUNT__</span> open PRs, <span class="mono">__ISSUE_COUNT__</span> open issues analyzed</div>
 </header>
+
+<div class="tabs" role="tablist" id="tabs"></div>
 
 <div class="stats" id="stats"></div>
 
 <div class="toolbar">
   <input type="search" id="search" placeholder="Search title, author, or #&hellip;">
-  <select id="ciFilter"><option value="">CI: any</option></select>
-  <select id="mergeFilter"><option value="">Merge: any</option></select>
-  <select id="reviewFilter"><option value="">Review: any</option></select>
-  <select id="draftFilter">
-    <option value="">Drafts: include</option>
-    <option value="hide">Drafts: hide</option>
-    <option value="only">Drafts: only</option>
-  </select>
+  <span id="filters" style="display:contents"></span>
 </div>
 
 <div class="tablewrap">
 <table id="tbl">
-  <thead>
-    <tr>
-      <th data-key="number">#</th>
-      <th data-key="title">Title</th>
-      <th data-key="author">Author</th>
-      <th data-key="reviewerScore">Priority</th>
-      <th data-key="ci">CI</th>
-      <th data-key="mergeable">Merge</th>
-      <th data-key="reviewDecision">Review</th>
-      <th data-key="diffLines">Diff</th>
-      <th data-key="ageDays">Age (d)</th>
-      <th data-key="idleDays">Idle (d)</th>
-      <th>Flags</th>
-    </tr>
-  </thead>
+  <thead><tr id="thead"></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
 </div>
@@ -209,7 +200,12 @@ function reviewBadge(v) {
   return { APPROVED: badge('approved', 'b-good'), CHANGES_REQUESTED: badge('changes req.', 'b-bad'),
     REVIEW_REQUIRED: badge('required', 'b-warn'), NONE: badge('none', 'b-muted') }[v] || v;
 }
+function kindBadge(v) {
+  return { BUG: badge('bug', 'b-bad'), FEATURE: badge('feature', 'b-good'), HARDWARE: badge('hardware', 'b-warn'),
+    QUESTION: badge('question', 'b-muted'), OTHER: badge('other', 'b-muted') }[v] || v;
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function prLink(n) { return `<a href="https://github.com/__REPO__/pull/${n}" target="_blank" rel="noopener">#${n}</a>`; }
 
 function meter(score) {
   const pct = Math.max(-100, Math.min(100, (score / SCORE_SCALE) * 100)) / 2; // half-track max
@@ -223,55 +219,154 @@ function meter(score) {
       </span>
     </div>`;
 }
-
-function populateFilter(id, key) {
-  const sel = document.getElementById(id);
-  const values = [...new Set(DATA.map(d => d[key]))].sort();
-  for (const v of values) {
-    const opt = document.createElement('option');
-    opt.value = v; opt.textContent = v;
-    sel.appendChild(opt);
-  }
+function titleCell(r, extraBadges) {
+  return `<td class="title-cell"><a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>${extraBadges}</td>`;
 }
-populateFilter('ciFilter', 'ci');
-populateFilter('mergeFilter', 'mergeable');
-populateFilter('reviewFilter', 'reviewDecision');
+const num = v => `<td class="mono num-cell">${v}</td>`;
+const flags = list => `<td class="subtle">${list.length ? list.length + ' &#9888;' : '&ndash;'}</td>`;
 
-function renderStats(rows) {
-  const stats = [
-    ['Open PRs', rows.length, null],
-    ['Drafts', rows.filter(r => r.isDraft).length, null],
-    ['CI failing', rows.filter(r => r.ci === 'FAILING').length, 'bad'],
-    ['Conflicts', rows.filter(r => r.mergeable === 'CONFLICTING').length, 'bad'],
-    ['Empty/short desc.', rows.filter(r => r.descriptionState !== 'OK').length, 'warn'],
-    ['No testing mentioned', rows.filter(r => r.descriptionState === 'OK' && !r.mentionsTesting).length, 'warn'],
-    ['Approved, unmerged', rows.filter(r => r.reviewDecision === 'APPROVED').length, 'good'],
-    ['Likely abandoned', rows.filter(r => r.idleDays > 21 && r.reviewDecision === 'CHANGES_REQUESTED').length, 'warn'],
-  ];
-  document.getElementById('stats').innerHTML = stats.map(([l, n, sem]) =>
+// Each view: columns (key = sort field, null = unsortable), select filters
+// (built from the values present unless options are given), stat tiles, and
+// the two lists shown when a row is expanded.
+const VIEWS = {
+  prs: {
+    label: 'Pull requests', noun: 'PRs', scoreKey: 'reviewerScore',
+    rowClass: r => r.isDraft ? 'draft' : '',
+    columns: [
+      ['#', 'number', r => num(r.number)],
+      ['Title', 'title', r => titleCell(r, (r.isDraft ? ' ' + badge('draft', 'b-muted') : '')
+        + (r.suspiciousAgentMarker ? ' ' + badge('&#9888; agent-marker', 'b-warn') : ''))],
+      ['Author', 'author', r => `<td>${esc(r.author)}</td>`],
+      ['Merged', 'authorMergedPRs', r => num(r.authorMergedPRs ?? '?')],
+      ['Priority', 'reviewerScore', r => `<td>${meter(r.reviewerScore)}</td>`],
+      ['CI', 'ci', r => `<td>${ciBadge(r.ci)}</td>`],
+      ['Merge', 'mergeable', r => `<td>${mergeBadge(r.mergeable)}</td>`],
+      ['Review', 'reviewDecision', r => `<td>${reviewBadge(r.reviewDecision)}</td>`],
+      ['Diff', 'diffLines', r => `<td class="mono num-cell">${r.diffLines}<span class="subtle">/${r.filesChanged}f</span></td>`],
+      ['Age (d)', 'ageDays', r => num(r.ageDays)],
+      ['Idle (d)', 'idleDays', r => num(r.idleDays)],
+      ['Flags', null, r => flags(r.submitterFeedback)],
+    ],
+    filters: [
+      { label: 'CI', test: (r, v) => r.ci === v, values: 'ci' },
+      { label: 'Merge', test: (r, v) => r.mergeable === v, values: 'mergeable' },
+      { label: 'Review', test: (r, v) => r.reviewDecision === v, values: 'reviewDecision' },
+      { label: 'Drafts', anyLabel: 'include', options: [['hide', 'hide'], ['only', 'only']],
+        test: (r, v) => v === 'hide' ? !r.isDraft : r.isDraft },
+    ],
+    stats: rows => [
+      ['Open PRs', rows.length, null],
+      ['Drafts', rows.filter(r => r.isDraft).length, null],
+      ['CI failing', rows.filter(r => r.ci === 'FAILING').length, 'bad'],
+      ['Conflicts', rows.filter(r => r.mergeable === 'CONFLICTING').length, 'bad'],
+      ['Empty/short desc.', rows.filter(r => r.descriptionState !== 'OK').length, 'warn'],
+      ['First-time authors', rows.filter(r => r.authorMergedPRs === 0).length, null],
+      ['Long description', rows.filter(r => r.descriptionLength > 1500).length, 'warn'],
+      ['Approved, unmerged', rows.filter(r => r.reviewDecision === 'APPROVED').length, 'good'],
+      ['Likely abandoned', rows.filter(r => r.idleDays > 21 && r.reviewDecision === 'CHANGES_REQUESTED').length, 'warn'],
+    ],
+    detail: r => [
+      ['Feedback for submitter', r.submitterFeedback, 'No issues flagged.'],
+      ['Why a reviewer might pick this up', r.reviewerReasons, 'No standout signals.'],
+    ],
+  },
+  issues: {
+    label: 'Issues', noun: 'issues', scoreKey: 'priorityScore',
+    rowClass: r => r.isStale ? 'draft' : '',
+    columns: [
+      ['#', 'number', r => num(r.number)],
+      ['Title', 'title', r => titleCell(r, r.isStale
+        ? ' ' + badge(r.closesInDays ? `stale &middot; ${r.closesInDays}d` : "stale &middot; overdue", r.participants + r.reactionCount >= 3 ? 'b-warn' : 'b-muted') : '')],
+      ['Author', 'author', r => `<td>${esc(r.author)}</td>`],
+      ['Priority', 'priorityScore', r => `<td>${meter(r.priorityScore)}</td>`],
+      ['Kind', 'kind', r => `<td>${kindBadge(r.kind)}</td>`],
+      ['People', 'participants', r => num(r.participants)],
+      ['Reactions', 'reactionCount', r => num(r.reactionCount)],
+      ['Open PRs', 'linkedPRCount', r => `<td class="mono num-cell">${r.linkedPRs.length ? r.linkedPRs.map(prLink).join(' ') : '<span class="subtle">&ndash;</span>'}</td>`],
+      ['Age (d)', 'ageDays', r => num(r.ageDays)],
+      ['Idle (d)', 'idleDays', r => num(r.idleDays)],
+      ['Flags', null, r => flags(r.reporterFeedback)],
+    ],
+    filters: [
+      { label: 'Kind', test: (r, v) => r.kind === v, values: 'kind' },
+      { label: 'Stale', anyLabel: 'include', options: [['hide', 'hide'], ['only', 'only']],
+        test: (r, v) => v === 'hide' ? !r.isStale : r.isStale },
+      { label: 'Open PR', anyLabel: 'any', options: [['yes', 'has one'], ['no', 'none']],
+        test: (r, v) => (r.linkedPRs.length > 0) === (v === 'yes') },
+      { label: 'Response', anyLabel: 'any', options: [['none', 'never answered'], ['some', 'answered']],
+        test: (r, v) => (r.participants === 0) === (v === 'none') },
+    ],
+    stats: rows => [
+      ['Open issues', rows.length, null],
+      ['Never answered', rows.filter(r => r.participants === 0 && r.ageDays > 3).length, 'warn'],
+      ['Stale (auto-closing)', rows.filter(r => r.isStale).length, 'bad'],
+      ['Stale but wanted', rows.filter(r => r.isStale && r.participants + r.reactionCount >= 3).length, 'warn'],
+      ['Fix pending in PR', rows.filter(r => r.linkedPRs.length).length, 'good'],
+      ['Bugs missing details', rows.filter(r => r.missingDetails.length).length, 'warn'],
+      ['On old firmware', rows.filter(r => r.firmwareOutdated).length, 'warn'],
+      ['Confirmed by others', rows.filter(r => r.confirmations > 0).length, 'good'],
+    ],
+    detail: r => [
+      ['Feedback for reporter', r.reporterFeedback, 'No issues flagged.'],
+      ['Why a maintainer might pick this up', r.maintainerReasons, 'No standout signals.'],
+    ],
+  },
+};
+for (const r of DATA.issues) r.linkedPRCount = r.linkedPRs.length;
+
+let view = 'prs';
+let sortKey, sortDir, expanded;
+
+function buildTabs() {
+  document.getElementById('tabs').innerHTML = Object.entries(VIEWS).map(([id, v]) =>
+    `<button role="tab" data-view="${id}" aria-selected="${id === view}">${v.label}<span class="count mono">${DATA[id].length}</span></button>`
+  ).join('');
+  document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+}
+
+function switchView(id) {
+  view = id;
+  const v = VIEWS[id];
+  sortKey = v.scoreKey; sortDir = -1; expanded = null;
+  document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === id));
+  document.getElementById('search').value = '';
+
+  document.getElementById('filters').innerHTML = v.filters.map((f, i) => {
+    const opts = f.options || [...new Set(DATA[id].map(d => d[f.values]))].sort().map(x => [x, x]);
+    return `<select data-filter="${i}"><option value="">${f.label}: ${f.anyLabel || 'any'}</option>${
+      opts.map(([val, text]) => `<option value="${esc(val)}">${f.label}: ${esc(text)}</option>`).join('')}</select>`;
+  }).join('');
+  document.querySelectorAll('#filters select').forEach(s => s.addEventListener('input', render));
+
+  document.getElementById('thead').innerHTML = v.columns.map(([label, key]) =>
+    `<th${key ? ` data-key="${key}" tabindex="0"` : ''}${key === sortKey ? ' aria-sort="descending"' : ''}>${label}</th>`).join('');
+  document.querySelectorAll('th[data-key]').forEach(th => {
+    const sortBy = () => {
+      const key = th.dataset.key;
+      if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = key === 'title' || key === 'author' ? 1 : -1; }
+      document.querySelectorAll('th[data-key]').forEach(t => t.removeAttribute('aria-sort'));
+      th.setAttribute('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
+      render();
+    };
+    th.addEventListener('click', sortBy);
+    th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(); } });
+  });
+
+  document.getElementById('stats').innerHTML = v.stats(DATA[id]).map(([l, n, sem]) =>
     `<div class="stat" style="${sem ? `--stat-c: var(--${sem})` : ''}">
       <div class="n mono">${n}</div><div class="l">${l}</div>
     </div>`).join('');
+  render();
 }
-renderStats(DATA);
-
-let sortKey = 'reviewerScore', sortDir = -1;
-let expanded = null;
 
 function currentRows() {
+  const v = VIEWS[view];
   const q = document.getElementById('search').value.toLowerCase();
-  const ci = document.getElementById('ciFilter').value;
-  const merge = document.getElementById('mergeFilter').value;
-  const review = document.getElementById('reviewFilter').value;
-  const draft = document.getElementById('draftFilter').value;
-  let rows = DATA.filter(r => {
+  const active = [...document.querySelectorAll('#filters select')]
+    .filter(s => s.value).map(s => [v.filters[s.dataset.filter], s.value]);
+  const rows = DATA[view].filter(r => {
     if (q && !(`${r.number} ${r.title} ${r.author}`.toLowerCase().includes(q))) return false;
-    if (ci && r.ci !== ci) return false;
-    if (merge && r.mergeable !== merge) return false;
-    if (review && r.reviewDecision !== review) return false;
-    if (draft === 'hide' && r.isDraft) return false;
-    if (draft === 'only' && !r.isDraft) return false;
-    return true;
+    return active.every(([f, val]) => f.test(r, val));
   });
   rows.sort((a, b) => {
     const av = a[sortKey], bv = b[sortKey];
@@ -282,28 +377,16 @@ function currentRows() {
 }
 
 function render() {
+  const v = VIEWS[view];
   const rows = currentRows();
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'row' + (r.isDraft ? ' draft' : '') + (expanded === r.number ? ' expanded' : '');
-    tr.dataset.number = r.number;
-    const flagCount = r.submitterFeedback.length;
-    tr.innerHTML = `
-      <td class="mono num-cell">${r.number}</td>
-      <td class="title-cell"><a href="${r.url}" target="_blank" rel="noopener">${esc(r.title)}</a>${r.isDraft ? ' ' + badge('draft', 'b-muted') : ''}${r.suspiciousAgentMarker ? ' ' + badge('&#9888; agent-marker', 'b-warn') : ''}</td>
-      <td>${esc(r.author)}</td>
-      <td>${meter(r.reviewerScore)}</td>
-      <td>${ciBadge(r.ci)}</td>
-      <td>${mergeBadge(r.mergeable)}</td>
-      <td>${reviewBadge(r.reviewDecision)}</td>
-      <td class="mono num-cell">${r.diffLines}<span class="subtle">/${r.filesChanged}f</span></td>
-      <td class="mono num-cell">${r.ageDays}</td>
-      <td class="mono num-cell">${r.idleDays}</td>
-      <td class="subtle">${flagCount ? flagCount + ' &#9888;' : '&ndash;'}</td>
-    `;
-    tr.addEventListener('click', () => {
+    tr.className = ['row', v.rowClass(r), expanded === r.number ? 'expanded' : ''].join(' ');
+    tr.innerHTML = v.columns.map(([, , cell]) => cell(r)).join('');
+    tr.addEventListener('click', e => {
+      if (e.target.closest('a')) return; // let links open without toggling the row
       expanded = expanded === r.number ? null : r.number;
       render();
     });
@@ -312,36 +395,20 @@ function render() {
       const dr = document.createElement('tr');
       dr.className = 'detail-row';
       const td = document.createElement('td');
-      td.colSpan = 11;
-      const submitter = r.submitterFeedback.length
-        ? `<ul>${r.submitterFeedback.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`
-        : '<div class="empty">No issues flagged.</div>';
-      const reviewer = r.reviewerReasons.length
-        ? `<ul>${r.reviewerReasons.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`
-        : '<div class="empty">No standout signals.</div>';
-      td.innerHTML = `<div class="detail">
-        <div><h4>Feedback for submitter</h4>${submitter}</div>
-        <div><h4>Why a reviewer might pick this up</h4>${reviewer}</div>
-      </div>`;
+      td.colSpan = v.columns.length;
+      td.innerHTML = `<div class="detail">${v.detail(r).map(([heading, items, empty]) =>
+        `<div><h4>${heading}</h4>${items.length
+          ? `<ul>${items.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`
+          : `<div class="empty">${empty}</div>`}</div>`).join('')}</div>`;
       dr.appendChild(td);
       tbody.appendChild(dr);
     }
   }
 }
 
-document.querySelectorAll('th[data-key]').forEach(th => {
-  th.addEventListener('click', () => {
-    const key = th.dataset.key;
-    if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = key === 'title' || key === 'author' ? 1 : -1; }
-    document.querySelectorAll('th[data-key]').forEach(t => t.removeAttribute('aria-sort'));
-    th.setAttribute('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
-    render();
-  });
-});
-['search', 'ciFilter', 'mergeFilter', 'reviewFilter', 'draftFilter'].forEach(id =>
-  document.getElementById(id).addEventListener('input', render));
-
-render();
+document.getElementById('search').addEventListener('input', render);
+buildTabs();
+switchView(location.hash === '#issues' && DATA.issues.length ? 'issues' : 'prs');
 </script>
 </body>
 </html>
